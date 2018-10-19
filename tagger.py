@@ -16,6 +16,8 @@ WEIGHT_DECAY = 1e-8
 import torch
 torch.manual_seed(0)
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
 from metric import get_ner_fmeasure
 
 # Data reading
@@ -92,6 +94,7 @@ def main():
 
     # Model creation
     model = TaggerModel(NWORDS, NTAGS, pretrained_list, id_to_token)
+
     # Create optimizer and configure the learning rate
     optimizer = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE,
             weight_decay=WEIGHT_DECAY)
@@ -198,8 +201,9 @@ def do_pass(data, token_to_id, tag_to_id, id_to_tag, expressions, train):
             input_array[n, :len(tokens)] = torch.LongTensor(token_ids)
             output_array[n, :len(tags)] = torch.LongTensor(tag_ids)
 
+        model.to(device)
         # Construct computation
-        batch_loss, output = model(input_array, output_array, lengths,
+        batch_loss, output = model(input_array.to(device), output_array.to(device), lengths,
                 cur_batch_size)
 
         # Run computations
