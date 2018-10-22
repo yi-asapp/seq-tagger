@@ -4,6 +4,7 @@ import numpy as np
 PAD = "__PAD__"
 UNK = "__UNK__"
 DIM_EMBEDDING = 100
+LSTM_LAYER = 3
 LSTM_HIDDEN = 100
 BATCH_SIZE = 10
 LEARNING_RATE = 0.015
@@ -93,7 +94,7 @@ def main():
             pretrained_list.append(random_vector)
 
     # Model creation
-    model = TaggerModel(NWORDS, NTAGS, pretrained_list, id_to_token)
+    model = TaggerModel(NWORDS, NTAGS, pretrained_list)
 
     # Create optimizer and configure the learning rate
     optimizer = torch.optim.SGD(model.parameters(), lr=LEARNING_RATE,
@@ -102,6 +103,7 @@ def main():
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer,
             lr_lambda=rescale_lr)
 
+    dev_f1, test_f1 = 0, 0
     expressions = (model, optimizer)
     for epoch in range(EPOCHS):
         random.shuffle(train)
@@ -117,8 +119,12 @@ def main():
         model.eval()
         _, df1 = do_pass(dev, token_to_id, tag_to_id, id_to_tag, expressions, False)
         _, tef1 = do_pass(test, token_to_id, tag_to_id, id_to_tag, expressions, False)
-        print("{} {} loss {} dev-f1 {} test-f1 {}".format(datetime.datetime.now(),
+        if df1 > dev_f1:
+            dev_f1, test_f1 = df1, tef1
+        print("{0} {1} loss {2} dev-f1 {3:.4f} test-f1 {4:.4f}".format(datetime.datetime.now(),
                 epoch, loss, df1, tef1))
+
+    print("Finish training - dev-f1 {0:.4f} test-f1 {1:.4f}".format(dev_f1, test_f1)) 
 
     # Save model
     #torch.save(model.state_dict(), "tagger.pt.model")
@@ -129,7 +135,7 @@ def main():
 
 class TaggerModel(torch.nn.Module):
 
-    def __init__(self, nwords, ntags, pretrained_list, id_to_token):
+    def __init__(self, nwords, ntags, pretrained_list):
         super().__init__()
 
         # Create word embeddings
@@ -139,7 +145,7 @@ class TaggerModel(torch.nn.Module):
         # Create input dropout parameter
         self.word_dropout = torch.nn.Dropout(1 - KEEP_PROB)
         # Create LSTM parameters
-        self.lstm = torch.nn.LSTM(DIM_EMBEDDING, LSTM_HIDDEN, num_layers=1,
+        self.lstm = torch.nn.LSTM(DIM_EMBEDDING, LSTM_HIDDEN, num_layers=LSTM_LAYER,
                 batch_first=True, bidirectional=True)
         # Create output dropout parameter
         self.lstm_output_dropout = torch.nn.Dropout(1 - KEEP_PROB)
@@ -178,15 +184,10 @@ def do_pass(data, token_to_id, tag_to_id, id_to_tag, expressions, train):
 
     # Loop over batches
     loss = 0
-    match = 0
-    total = 0
     gold_lists, pred_lists = [], []
     for start in range(0, len(data), BATCH_SIZE):
         batch = data[start : start + BATCH_SIZE]
         batch.sort(key = lambda x: -len(x[0]))
-        #if start % 4000 == 0 and start > 0:
-        #    print(loss, match / total)
-        #    sys.stdout.flush()
 
         # Prepare inputs
         cur_batch_size = len(batch)
@@ -195,7 +196,7 @@ def do_pass(data, token_to_id, tag_to_id, id_to_tag, expressions, train):
         input_array = torch.zeros((cur_batch_size, max_length)).long()
         output_array = torch.zeros((cur_batch_size, max_length)).long()
         for n, (tokens, tags) in enumerate(batch):
-            token_ids = [token_to_id.get(simplify_token(t), 0) for t in tokens]
+            token_ids = [token_to_id.get(simplify_token(t), 1) for t in tokens]
             tag_ids = [tag_to_id[t] for t in tags]
 
             input_array[n, :len(tokens)] = torch.LongTensor(token_ids)
@@ -214,14 +215,10 @@ def do_pass(data, token_to_id, tag_to_id, id_to_tag, expressions, train):
             loss += batch_loss.item()
         predicted = output.cpu().data.numpy()
 
-        # Update the number of correct tags and total tags
         for (_, g), a in zip(batch, predicted):
             gold_list, pred_list = [], []
-            total += len(g)
             for gt, at in zip(g, a):
                 at = id_to_tag[at]
-                if gt == at:
-                    match += 1
                 gold_list.append(gt)
                 pred_list.append(at)
             gold_lists.append(gold_list)

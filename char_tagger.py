@@ -4,6 +4,7 @@ import numpy as np
 PAD = "__PAD__"
 UNK = "__UNK__"
 DIM_EMBEDDING = 100
+LSTM_LAYER = 3
 LSTM_HIDDEN = 100
 CHAR_DIM_EMBEDDING = 15
 CHAR_LSTM_HIDDEN = 15
@@ -112,6 +113,7 @@ def main():
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer,
             lr_lambda=rescale_lr)
 
+    dev_f1, test_f1 = 0, 0
     expressions = (model, optimizer)
     for epoch in range(EPOCHS):
         random.shuffle(train)
@@ -127,8 +129,12 @@ def main():
         model.eval()
         _, df1 = do_pass(dev, token_to_id, char_to_id, tag_to_id, id_to_tag, expressions, False)
         _, tef1 = do_pass(test, token_to_id, char_to_id, tag_to_id, id_to_tag, expressions, False)
-        print("{} {} loss {} dev-f1 {} test-f1 {}".format(datetime.datetime.now(),
+        if df1 > dev_f1:
+            dev_f1, test_f1 = df1, tef1
+        print("{0} {1} loss {2} dev-f1 {3:.4f} test-f1 {4:.4f}".format(datetime.datetime.now(),
                 epoch, loss, df1, tef1))
+
+    print("Finish training - dev-f1 {0:.4f} test-f1 {1:.4f}".format(dev_f1, test_f1)) 
 
     # Save model
     #torch.save(model.state_dict(), "tagger.pt.model")
@@ -149,7 +155,7 @@ class TaggerModel(torch.nn.Module):
         # Create input dropout parameter
         self.word_dropout = torch.nn.Dropout(1 - KEEP_PROB)
         # Create LSTM parameters
-        self.lstm = torch.nn.LSTM(DIM_EMBEDDING + CHAR_LSTM_HIDDEN, LSTM_HIDDEN, num_layers=1,
+        self.lstm = torch.nn.LSTM(DIM_EMBEDDING + CHAR_LSTM_HIDDEN, LSTM_HIDDEN, num_layers=LSTM_LAYER,
                 batch_first=True, bidirectional=True)
         # Create output dropout parameter
         self.lstm_output_dropout = torch.nn.Dropout(1 - KEEP_PROB)
@@ -206,8 +212,6 @@ def do_pass(data, token_to_id, char_to_id, tag_to_id, id_to_tag, expressions, tr
 
     # Loop over batches
     loss = 0
-    match = 0
-    total = 0
     gold_lists, pred_lists = [], []
     for start in range(0, len(data), BATCH_SIZE):
         batch = data[start : start + BATCH_SIZE]
@@ -253,11 +257,8 @@ def do_pass(data, token_to_id, char_to_id, tag_to_id, id_to_tag, expressions, tr
         # Update the number of correct tags and total tags
         for (_, g), a in zip(batch, predicted):
             gold_list, pred_list = [], []
-            total += len(g)
             for gt, at in zip(g, a):
                 at = id_to_tag[at]
-                if gt == at:
-                    match += 1
                 gold_list.append(gt)
                 pred_list.append(at)
             gold_lists.append(gold_list)
