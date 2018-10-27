@@ -155,7 +155,7 @@ class TaggerModel(torch.nn.Module):
         # Create final matrix multiply parameters
         self.hidden_to_tag = torch.nn.Linear(LSTM_HIDDEN * 2, ntags + 2)
 
-        self.crf = CRF(target_size=ntags)
+        self.crf = CRF(tagset_size=ntags)
 
     def forward(self, sentences, mask, labels, lengths, cur_batch_size, epo):
         max_length = sentences.size(1)
