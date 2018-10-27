@@ -191,7 +191,7 @@ class CRF(nn.Module):
         decode_idx[-1] = pointer.data
         for idx in range(len(back_points)-2, -1, -1):
             pointer = torch.gather(back_points[idx], 1, pointer.contiguous().view(batch_size, 1))
-            decode_idx[idx] = pointer.data
+            decode_idx[idx] = pointer.view(-1).data
         path_score = None
         decode_idx = decode_idx.transpose(1,0)
         return path_score, decode_idx
