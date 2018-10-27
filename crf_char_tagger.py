@@ -172,7 +172,7 @@ class TaggerModel(torch.nn.Module):
 
         self.crf = CRF(target_size=ntags)
 
-    def forward(self, sentences, sent_chars, labels, lengths, char_lengths, cur_batch_size, epo):
+    def forward(self, sentences, mask, sent_chars, labels, lengths, char_lengths, cur_batch_size, epo):
         max_length = sentences.size(1)
         max_char_length = sent_chars.size(2)
 
@@ -239,6 +239,7 @@ def do_pass(data, token_to_id, char_to_id, tag_to_id, id_to_tag, expressions, tr
             for _ in range(max_length - len(tokens)):
                 char_lengths.append(0)
         input_array = torch.zeros((cur_batch_size, max_length)).long()
+        mask_array = torch.zeros((cur_batch_size, max_length)).byte()
         input_char_array = torch.zeros((cur_batch_size, max_length, max_char_length)).long()
         output_array = torch.zeros((cur_batch_size, max_length)).long()
         for n, (tokens, tags) in enumerate(batch):
@@ -248,12 +249,14 @@ def do_pass(data, token_to_id, char_to_id, tag_to_id, id_to_tag, expressions, tr
                 char_ids = [char_to_id.get(c, 1) for c in simplify_token(token)]
                 input_char_array[n, m,  :len(token)] = torch.LongTensor(char_ids)
             tag_ids = [tag_to_id[t] for t in tags]
+            mask_ids = [1 for t in tags]
+            mask_array[n, :len(tokens)] = torch.LongTensor(mask_ids)
             output_array[n, :len(tags)] = torch.LongTensor(tag_ids)
 
         model.to(device)
         # Construct computation
-        batch_loss, output = model(input_array.to(device), input_char_array.to(device), output_array.to(device),
-                lengths, char_lengths, cur_batch_size, epo)
+        batch_loss, output = model(input_array.to(device), input_char_array.to(device), mask_array.to(device),
+                output_array.to(device), lengths, char_lengths, cur_batch_size, epo)
 
         # Run computations
         if train:
