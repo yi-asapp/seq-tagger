@@ -255,7 +255,7 @@ def do_pass(data, token_to_id, char_to_id, tag_to_id, id_to_tag, expressions, tr
 
         model.to(device)
         # Construct computation
-        batch_loss, output = model(input_array.to(device), input_char_array.to(device), mask_array.to(device),
+        batch_loss, output = model(input_array.to(device), mask_array.to(device), input_char_array.to(device),
                 output_array.to(device), lengths, char_lengths, cur_batch_size, epo)
 
         # Run computations
