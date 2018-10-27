@@ -6,8 +6,8 @@ from crf import CRF
 PAD = "__PAD__"
 UNK = "__UNK__"
 DIM_EMBEDDING = 100
-LSTM_LAYER = 3
-LSTM_HIDDEN = 100
+LSTM_LAYER = 2
+LSTM_HIDDEN = 250
 BATCH_SIZE = 10
 LEARNING_RATE = 0.015
 LEARNING_DECAY_RATE = 0.05
@@ -75,6 +75,7 @@ def main():
             if tag not in tag_to_id:
                 tag_to_id[tag] = len(tag_to_id)
                 id_to_tag.append(tag)
+    id_to_tag += ["START_TAG", "END_TAG"]
     NWORDS = len(token_to_id)
     NTAGS = len(tag_to_id)
 
@@ -116,11 +117,11 @@ def main():
         model.train()
         model.zero_grad()
         loss, trf1 = do_pass(train, token_to_id, tag_to_id, id_to_tag, expressions,
-                True)
+                True, epoch)
 
         model.eval()
-        _, df1 = do_pass(dev, token_to_id, tag_to_id, id_to_tag, expressions, False)
-        _, tef1 = do_pass(test, token_to_id, tag_to_id, id_to_tag, expressions, False)
+        _, df1 = do_pass(dev, token_to_id, tag_to_id, id_to_tag, expressions, False, epoch)
+        _, tef1 = do_pass(test, token_to_id, tag_to_id, id_to_tag, expressions, False, epoch)
         if df1 > dev_f1:
             dev_f1, test_f1 = df1, tef1
         print("{0} {1} loss {2} dev-f1 {3:.4f} test-f1 {4:.4f}".format(datetime.datetime.now(),
@@ -152,11 +153,11 @@ class TaggerModel(torch.nn.Module):
         # Create output dropout parameter
         self.lstm_output_dropout = torch.nn.Dropout(1 - KEEP_PROB)
         # Create final matrix multiply parameters
-        self.hidden_to_tag = torch.nn.Linear(LSTM_HIDDEN * 2, ntags)
+        self.hidden_to_tag = torch.nn.Linear(LSTM_HIDDEN * 2, ntags + 2)
 
         self.crf = CRF(target_size=ntags)
 
-    def forward(self, sentences, mask, labels, lengths, cur_batch_size):
+    def forward(self, sentences, mask, labels, lengths, cur_batch_size, epo):
         max_length = sentences.size(1)
 
         # Look up word vectors
@@ -173,20 +174,22 @@ class TaggerModel(torch.nn.Module):
         lstm_out_dropped = self.lstm_output_dropout(lstm_out)
         # Matrix multiply to get scores for each tag
         output_scores = self.hidden_to_tag(lstm_out_dropped)
-
-        loss = self.crf.neg_log_likelihood_loss(output_scores, mask, labels)
-        _, predicted_tags = self.crf(output_scores, mask)
-
+      
+        if epo > 15:
+            loss = self.crf.neg_log_likelihood_loss(output_scores, mask, labels)
+            _, predicted_tags = self.crf(output_scores, mask)
+        else:
         # Calculate loss and predictions
- #       output_scores = output_scores.view(cur_batch_size * max_length, -1)
- #       flat_labels = labels.view(cur_batch_size * max_length)
- #       loss_function = torch.nn.CrossEntropyLoss(ignore_index=0, reduction='sum')
- #       loss = loss_function(output_scores, flat_labels)
- #       predicted_tags  = torch.argmax(output_scores, 1)
+            output_scores = output_scores.view(cur_batch_size * max_length, -1)
+            flat_labels = labels.view(cur_batch_size * max_length)
+            loss_function = torch.nn.CrossEntropyLoss(ignore_index=0, reduction='sum')
+            loss = loss_function(output_scores, flat_labels)
+            predicted_tags  = torch.argmax(output_scores, 1)
+
         predicted_tags = predicted_tags.view(cur_batch_size, max_length)
         return loss, predicted_tags
 
-def do_pass(data, token_to_id, tag_to_id, id_to_tag, expressions, train):
+def do_pass(data, token_to_id, tag_to_id, id_to_tag, expressions, train, epo):
     model, optimizer = expressions
 
     # Loop over batches
@@ -201,7 +204,7 @@ def do_pass(data, token_to_id, tag_to_id, id_to_tag, expressions, train):
         max_length = len(batch[0][0])
         lengths = [len(v[0]) for v in batch]
         input_array = torch.zeros((cur_batch_size, max_length)).long()
-        mask_array = torch.zeros((cur_batch_size, max_length)).long()
+        mask_array = torch.zeros((cur_batch_size, max_length)).byte()
         output_array = torch.zeros((cur_batch_size, max_length)).long()
         for n, (tokens, tags) in enumerate(batch):
             token_ids = [token_to_id.get(simplify_token(t), 1) for t in tokens]
@@ -214,7 +217,7 @@ def do_pass(data, token_to_id, tag_to_id, id_to_tag, expressions, train):
         model.to(device)
         # Construct computation
         batch_loss, output = model(input_array.to(device), mask_array.to(device),
-                output_array.to(device), lengths, cur_batch_size)
+                output_array.to(device), lengths, cur_batch_size, epo)
 
         # Run computations
         if train:
