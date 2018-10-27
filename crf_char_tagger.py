@@ -126,11 +126,11 @@ def main():
         model.train()
         model.zero_grad()
 
-        loss, trf1 = do_pass(train, token_to_id, char_to_id, tag_to_id, id_to_tag, expressions, True)
+        loss, trf1 = do_pass(train, token_to_id, char_to_id, tag_to_id, id_to_tag, expressions, True, epoch)
 
         model.eval()
-        _, df1 = do_pass(dev, token_to_id, char_to_id, tag_to_id, id_to_tag, expressions, False)
-        _, tef1 = do_pass(test, token_to_id, char_to_id, tag_to_id, id_to_tag, expressions, False)
+        _, df1 = do_pass(dev, token_to_id, char_to_id, tag_to_id, id_to_tag, expressions, False, epoch)
+        _, tef1 = do_pass(test, token_to_id, char_to_id, tag_to_id, id_to_tag, expressions, False, epoch)
         if df1 > dev_f1:
             dev_f1, test_f1 = df1, tef1
         print("{0} {1} loss {2} dev-f1 {3:.4f} test-f1 {4:.4f}".format(datetime.datetime.now(),
@@ -172,7 +172,7 @@ class TaggerModel(torch.nn.Module):
 
         self.crf = CRF(target_size=ntags)
 
-    def forward(self, sentences, sent_chars, labels, lengths, char_lengths, cur_batch_size):
+    def forward(self, sentences, sent_chars, labels, lengths, char_lengths, cur_batch_size, epo):
         max_length = sentences.size(1)
         max_char_length = sent_chars.size(2)
 
@@ -216,7 +216,7 @@ class TaggerModel(torch.nn.Module):
         predicted_tags = predicted_tags.view(cur_batch_size, max_length)
         return loss, predicted_tags
 
-def do_pass(data, token_to_id, char_to_id, tag_to_id, id_to_tag, expressions, train):
+def do_pass(data, token_to_id, char_to_id, tag_to_id, id_to_tag, expressions, train, epo):
     model, optimizer = expressions
 
     # Loop over batches
@@ -253,7 +253,7 @@ def do_pass(data, token_to_id, char_to_id, tag_to_id, id_to_tag, expressions, tr
         model.to(device)
         # Construct computation
         batch_loss, output = model(input_array.to(device), input_char_array.to(device), output_array.to(device),
-                lengths, char_lengths, cur_batch_size)
+                lengths, char_lengths, cur_batch_size, epo)
 
         # Run computations
         if train:
