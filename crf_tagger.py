@@ -127,7 +127,7 @@ def main():
         print("{0} {1} loss {2} dev-f1 {3:.4f} test-f1 {4:.4f}".format(datetime.datetime.now(),
                 epoch, loss, df1, tef1))
 
-    print("Finish training - dev-f1 {0:.4f} test-f1 {1:.4f}".format(dev_f1, test_f1)) 
+    print("Finish training - dev-f1 {0:.4f} test-f1 {1:.4f}".format(dev_f1, test_f1))
 
     # Save model
     #torch.save(model.state_dict(), "tagger.pt.model")
@@ -174,7 +174,7 @@ class TaggerModel(torch.nn.Module):
         lstm_out_dropped = self.lstm_output_dropout(lstm_out)
         # Matrix multiply to get scores for each tag
         output_scores = self.hidden_to_tag(lstm_out_dropped)
-      
+
         if epo > 15:
             loss = self.crf.neg_log_likelihood_loss(output_scores, mask, labels)
             _, predicted_tags = self.crf(output_scores, mask)
@@ -195,6 +195,7 @@ def do_pass(data, token_to_id, tag_to_id, id_to_tag, expressions, train, epo):
     # Loop over batches
     loss = 0
     gold_lists, pred_lists = [], []
+    maxll = 0
     for start in range(0, len(data), BATCH_SIZE):
         batch = data[start : start + BATCH_SIZE]
         batch.sort(key = lambda x: -len(x[0]))
@@ -202,6 +203,7 @@ def do_pass(data, token_to_id, tag_to_id, id_to_tag, expressions, train, epo):
         # Prepare inputs
         cur_batch_size = len(batch)
         max_length = len(batch[0][0])
+        maxll = max(maxll, max_length)
         lengths = [len(v[0]) for v in batch]
         input_array = torch.zeros((cur_batch_size, max_length)).long()
         mask_array = torch.zeros((cur_batch_size, max_length)).byte()
@@ -235,7 +237,7 @@ def do_pass(data, token_to_id, tag_to_id, id_to_tag, expressions, train, epo):
                 pred_list.append(at)
             gold_lists.append(gold_list)
             pred_lists.append(pred_list)
-
+    print ("MAX LEN %d" %maxll)
     return loss, get_ner_fmeasure(gold_lists, pred_lists)[-1]
 
 if __name__ == '__main__':
