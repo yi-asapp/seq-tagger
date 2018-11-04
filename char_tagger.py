@@ -4,10 +4,10 @@ import numpy as np
 PAD = "__PAD__"
 UNK = "__UNK__"
 DIM_EMBEDDING = 100
-LSTM_LAYER = 3
-LSTM_HIDDEN = 100
-CHAR_DIM_EMBEDDING = 15
-CHAR_LSTM_HIDDEN = 15
+LSTM_LAYER = 1
+LSTM_HIDDEN = 200
+CHAR_DIM_EMBEDDING = 30
+CHAR_LSTM_HIDDEN = 50
 BATCH_SIZE = 10
 LEARNING_RATE = 0.015
 LEARNING_DECAY_RATE = 0.05
@@ -134,7 +134,7 @@ def main():
         print("{0} {1} loss {2} dev-f1 {3:.4f} test-f1 {4:.4f}".format(datetime.datetime.now(),
                 epoch, loss, df1, tef1))
 
-    print("Finish training - dev-f1 {0:.4f} test-f1 {1:.4f}".format(dev_f1, test_f1)) 
+    print("Finish training - dev-f1 {0:.4f} test-f1 {1:.4f}".format(dev_f1, test_f1))
 
     # Save model
     #torch.save(model.state_dict(), "tagger.pt.model")

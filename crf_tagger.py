@@ -175,18 +175,9 @@ class TaggerModel(torch.nn.Module):
         # Matrix multiply to get scores for each tag
         output_scores = self.hidden_to_tag(lstm_out_dropped)
 
-        if epo > 15:
-            loss = self.crf.neg_log_likelihood_loss(output_scores, mask, labels)
-            _, predicted_tags = self.crf(output_scores, mask)
-        else:
-        # Calculate loss and predictions
-            output_scores = output_scores.view(cur_batch_size * max_length, -1)
-            flat_labels = labels.view(cur_batch_size * max_length)
-            loss_function = torch.nn.CrossEntropyLoss(ignore_index=0, reduction='sum')
-            loss = loss_function(output_scores, flat_labels)
-            predicted_tags  = torch.argmax(output_scores, 1)
+        loss = self.crf.neg_log_likelihood_loss(output_scores, mask, labels)
+        _, predicted_tags = self.crf(output_scores, mask)
 
-        predicted_tags = predicted_tags.view(cur_batch_size, max_length)
         return loss, predicted_tags
 
 def do_pass(data, token_to_id, tag_to_id, id_to_tag, expressions, train, epo):
@@ -195,7 +186,6 @@ def do_pass(data, token_to_id, tag_to_id, id_to_tag, expressions, train, epo):
     # Loop over batches
     loss = 0
     gold_lists, pred_lists = [], []
-    maxll = 0
     for start in range(0, len(data), BATCH_SIZE):
         batch = data[start : start + BATCH_SIZE]
         batch.sort(key = lambda x: -len(x[0]))
@@ -203,7 +193,6 @@ def do_pass(data, token_to_id, tag_to_id, id_to_tag, expressions, train, epo):
         # Prepare inputs
         cur_batch_size = len(batch)
         max_length = len(batch[0][0])
-        maxll = max(maxll, max_length)
         lengths = [len(v[0]) for v in batch]
         input_array = torch.zeros((cur_batch_size, max_length)).long()
         mask_array = torch.zeros((cur_batch_size, max_length)).byte()
@@ -237,7 +226,6 @@ def do_pass(data, token_to_id, tag_to_id, id_to_tag, expressions, train, epo):
                 pred_list.append(at)
             gold_lists.append(gold_list)
             pred_lists.append(pred_list)
-    print ("MAX LEN %d" %maxll)
     return loss, get_ner_fmeasure(gold_lists, pred_lists)[-1]
 
 if __name__ == '__main__':
