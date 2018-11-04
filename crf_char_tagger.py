@@ -6,14 +6,14 @@ from crf import CRF
 PAD = "__PAD__"
 UNK = "__UNK__"
 DIM_EMBEDDING = 100
-LSTM_LAYER = 2
+LSTM_LAYER = 1
 LSTM_HIDDEN = 200
 CHAR_DIM_EMBEDDING = 30
 CHAR_LSTM_HIDDEN = 50
 BATCH_SIZE = 10
 LEARNING_RATE = 0.015
 LEARNING_DECAY_RATE = 0.05
-EPOCHS = 300
+EPOCHS = 200
 KEEP_PROB = 0.5
 GLOVE = "./data/glove.6B.100d.txt"
 WEIGHT_DECAY = 1e-8
@@ -84,6 +84,7 @@ def main():
             if tag not in tag_to_id:
                 tag_to_id[tag] = len(tag_to_id)
                 id_to_tag.append(tag)
+    id_to_tag += ["START_TAG", "END_TAG"]
     NWORDS = len(token_to_id)
     NCHARS = len(char_to_id)
     NTAGS = len(tag_to_id)
@@ -202,18 +203,9 @@ class TaggerModel(torch.nn.Module):
         # Matrix multiply to get scores for each tag
         output_scores = self.hidden_to_tag(lstm_out_dropped)
 
-        if epo > 15:
-            loss = self.crf.neg_log_likelihood_loss(output_scores, mask, labels)
-            _, predicted_tags = self.crf(output_scores, mask)
-        else:
-        # Calculate loss and predictions
-            output_scores = output_scores.view(cur_batch_size * max_length, -1)
-            flat_labels = labels.view(cur_batch_size * max_length)
-            loss_function = torch.nn.CrossEntropyLoss(ignore_index=0, reduction='sum')
-            loss = loss_function(output_scores, flat_labels)
-            predicted_tags  = torch.argmax(output_scores, 1)
+        loss = self.crf.neg_log_likelihood_loss(output_scores, mask, labels)
+        _, predicted_tags = self.crf(output_scores, mask)
 
-        predicted_tags = predicted_tags.view(cur_batch_size, max_length)
         return loss, predicted_tags
 
 def do_pass(data, token_to_id, char_to_id, tag_to_id, id_to_tag, expressions, train, epo):
