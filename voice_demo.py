@@ -4,36 +4,48 @@ import numpy as np
 import torch
 torch.manual_seed(1234)
 
-device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
-device = torch.device('cpu')
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 # PROD side
-payment_slots = {
-'CardNum'    : ['NUMBER', "What is your card number?"],
-'ExpDate'    : ['DATE', "What is the expiration date of the card?"],
-'HolderName' : ['PERSON', "What is the name of the card holder?"]
-}
+intent_slots = {
 
-billhis_slots = {
-'Account'    : ['NUMBER', "What is your account number?"],
-'StartDate'       : ['DATE', "What is the start date?"]
+'payment' :
+    {
+    'CardNum'    : ['NUMBER', "What is your card number?"],
+    'ExpDate'    : ['DATE', "What is the expiration date of the card?"],
+    'HolderName' : ['PERSON', "What is the name of the card holder?"]
+    },
+
+'billing' :
+    {
+    'Account'    : ['NUMBER', "What is your account number?"],
+    'StartDate'  : ['DATE', "What is the start date?"]
+    },
+
+'scheduling' :
+    {
+    'Date'       : ['DATE', "What is the date that you prefer?"],
+    'Time'       : ['TIME', "What is the time that you prefer?"]
+    }
+
 }
 
 
 # ENG side
 def demo():
-#    slots = payment_slots
-#    print ("Can I have your credit card information?")
+    parser = argparse.ArgumentParser(description='Voice demo.')
+    parser.add_argument('intent')
+    args = parser.parse_args()
 
-    slots = billhis_slots
-    print ("What can I do for you?")
+    slots = intent_slots[args.intent]
+    print ("Can I have more information regarding %s?" %args.intent)
 
     values = {}
     while len(values) < len(slots):
         print ("Please input:")
         s = input()
-        entities = ner(s)
+        entities = ner(s) # call NLP service
         next_question = None
         for slot, meta in slots.items():
             if meta[0] in entities: # slot filling (NLU)
@@ -55,7 +67,7 @@ def ner(s):
     global checkpoint, model
     if checkpoint is None:
         # Load model
-        checkpoint = torch.load('tagger.pt.model')
+        checkpoint = torch.load('tagger.pt.model', map_location=lambda storage, loc: storage)
         # Model creation
         model = TaggerModel(checkpoint['nwords'], checkpoint['nchars'], checkpoint['ntags'], checkpoint['pretrained_list'])
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -172,7 +184,7 @@ def do_infer(batch, token_to_id, char_to_id, id_to_tag, model):
     for w, t in zip(batch[0], predicted[0]):
         tag = id_to_tag[t]
 #        print (w + ' : ' + tag)
-        if tag != 'O': 
+        if tag != 'O':
             tag = tag[2:]
         if tag == 'CARDINAL' or tag == 'QUANTITY': tag = 'NUMBER'
         if tag == 'GPE': tag = 'LOC'
