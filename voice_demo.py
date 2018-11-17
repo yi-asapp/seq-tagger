@@ -52,8 +52,9 @@ def demo():
                 values[slot] = entities[meta[0]][0]
             if slot not in values and next_question is None: # next question (ACTION)
                 next_question = meta[1]
-        print ("STATE")
+        print ("STATE:", end ="\t")
         print (values)
+        print ("#########################################")
         if next_question is not None: print (next_question)
     print ("All slots filled! Update account ... ")
 
@@ -199,7 +200,8 @@ def do_infer(batch, token_to_id, char_to_id, id_to_tag, model):
     if ne != '' and prev != 'O':
         if prev not in nes: nes[prev]  = []
         nes[prev].append(ne)
-    print ("NER extraction results:")
+    print ("#########################################")
+    print ("NER:", end ="\t")
     print (nes)
     return nes
 
