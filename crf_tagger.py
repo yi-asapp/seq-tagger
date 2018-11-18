@@ -1,7 +1,7 @@
 import argparse, random, sys, datetime
 import numpy as np
 
-from crf import CRF
+from crf2 import CRF
 
 PAD = "__PAD__"
 UNK = "__UNK__"
@@ -176,7 +176,7 @@ class TaggerModel(torch.nn.Module):
         output_scores = self.hidden_to_tag(lstm_out_dropped)
 
         loss = self.crf.neg_log_likelihood_loss(output_scores, mask, labels)
-        _, predicted_tags = self.crf(output_scores, mask)
+        predicted_tags = self.crf(output_scores, mask)
 
         return loss, predicted_tags
 

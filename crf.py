@@ -102,8 +102,7 @@ class CRF(nn.Module):
             mask: size=(batch_size, seq_len)
 
         Returns:
-            decode_idx: (batch_size, seq_len), viterbi decode结果
-            path_score: size=(batch_size, 1), 每个句子的得分
+            best_path: size=(batch_size, seq_len)
         """
         batch_size = feats.size(0)
         seq_len = feats.size(1)
@@ -121,28 +120,22 @@ class CRF(nn.Module):
             1, tag_size, tag_size).expand(ins_num, tag_size, tag_size)
         scores = scores.view(seq_len, batch_size, tag_size, tag_size)
 
-        seq_iter = enumerate(scores)
         # record the position of the best score
-        back_points = list()
-        partition_history = list()
+        back_points, partition_history = [], []
 
         # mask = 1 + (-1) * mask
         mask = (1 - mask.long()).byte()
-        try:
-            _, inivalues = seq_iter.__next__()
-        except:
-            _, inivalues = seq_iter.next()
 
-        partition = inivalues[:, self.START_TAG_IDX, :].clone().view(batch_size, tag_size, 1)
+        partition = scores[0, :, self.START_TAG_IDX, :].clone().view(batch_size, tag_size, 1)
         partition_history.append(partition)
 
-        for idx, cur_values in seq_iter:
+        for idx, cur_values in enumerate(scores[1:]):
             cur_values = cur_values + partition.contiguous().view(
                 batch_size, tag_size, 1).expand(batch_size, tag_size, tag_size)
             partition, cur_bp = torch.max(cur_values, 1)
             partition_history.append(partition.unsqueeze(-1))
 
-            cur_bp.masked_fill_(mask[idx].view(batch_size, 1).expand(batch_size, tag_size), 0)
+            cur_bp.masked_fill_(mask[idx+1].view(batch_size, 1).expand(batch_size, tag_size), 0)
             back_points.append(cur_bp)
 
         partition_history = torch.cat(partition_history).view(
@@ -174,13 +167,12 @@ class CRF(nn.Module):
         for idx in range(len(back_points)-2, -1, -1):
             pointer = torch.gather(back_points[idx], 1, pointer.contiguous().view(batch_size, 1))
             decode_idx[idx] = pointer.view(-1).data
-        path_score = None
-        decode_idx = decode_idx.transpose(1, 0)
-        return path_score, decode_idx
+        best_path = decode_idx.transpose(1, 0)
+        return best_path
 
     def forward(self, feats, mask):
-        path_score, best_path = self._viterbi_decode(feats, mask)
-        return path_score, best_path
+        best_path = self._viterbi_decode(feats, mask)
+        return best_path
 
     def _score_sentence(self, scores, mask, tags):
         """
@@ -190,12 +182,13 @@ class CRF(nn.Module):
             tags: size=(batch_size, seq_len)
 
         Returns:
-            score:
+            seq_scores: batch_size
         """
         batch_size = scores.size(1)
         seq_len = scores.size(0)
         tag_size = scores.size(-1)
 
+        # convert tag value into a new format, recorded label bigram information to index
         new_tags = torch.LongTensor(batch_size, seq_len)
         new_tags = new_tags.to(self.device)
         for idx in range(seq_len):
@@ -208,7 +201,6 @@ class CRF(nn.Module):
             1, tag_size).expand(batch_size, tag_size)
         length_mask = torch.sum(mask, dim=1).view(batch_size, 1).long()
         end_ids = torch.gather(tags, 1, length_mask-1)
-
         end_energy = torch.gather(end_transition, 1, end_ids)
 
         new_tags = new_tags.transpose(1, 0).contiguous().view(seq_len, batch_size, 1)
@@ -216,9 +208,9 @@ class CRF(nn.Module):
             seq_len, batch_size)
         tg_energy = tg_energy.masked_select(mask.transpose(1, 0))
 
-        gold_score = tg_energy.sum() + end_energy.sum()
+        score = tg_energy.sum() + end_energy.sum()
 
-        return gold_score
+        return score
 
     def neg_log_likelihood_loss(self, feats, mask, tags):
         """
