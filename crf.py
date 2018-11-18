@@ -234,6 +234,7 @@ class CRF(nn.Module):
             tags: size=(batch_size, seq_len)
         """
         batch_size = feats.size(0)
+        seq_len = feats,size(1)
         _, scores = self._viterbi_decode(feats, mask)
         gold_score = self._score_sentence(scores, mask, tags)
 
