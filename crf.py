@@ -1,25 +1,23 @@
-#!/usr/bin/env python
-# -*- encoding: utf-8 -*-
-
 import torch
-from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
 
 
-def log_sum_exp(vec, m_size):
+def log_sum_exp(inp, m_size):
     """
+    LogSumExp trick: https://en.wikipedia.org/wiki/LogSumExp
+
     Args:
-        vec: size=(batch_size, vanishing_dim, hidden_dim)
+        inp: size=(batch_size, vanishing_dim, hidden_dim)
         m_size: hidden_dim
 
     Returns:
-        size=(batch_size, hidden_dim)
+        out: size=(batch_size, hidden_dim)
     """
-    _, idx = torch.max(vec, 1)  # B * 1 * M
-    max_score = torch.gather(vec, 1, idx.view(-1, 1, m_size)).view(-1, 1, m_size)  # B * M
+    _, idx = torch.max(inp, 1)  # batch_size * hidden_dim
+    max_score = torch.gather(inp, 1, idx.view(-1, 1, m_size)).view(-1, 1, m_size)  # batch_size * 1 * hidden_dim
     return max_score.view(-1, m_size) + torch.log(torch.sum(
-        torch.exp(vec - max_score.expand_as(vec)), 1)).view(-1, m_size)
+        torch.exp(inp - max_score.expand_as(inp)), 1)).view(-1, m_size)
 
 
 class CRF(nn.Module):
@@ -28,36 +26,37 @@ class CRF(nn.Module):
         """
         Args:
             target_size: int, target size
-            use_cuda: bool, 是否使用gpu, default is True
-            average_batch: bool, loss是否作平均, default is True
+            average_batch: bool, average loss over a batch, default is False
+            device: torch.device, device type
         """
         super(CRF, self).__init__()
         for k in kwargs:
             self.__setattr__(k, kwargs[k])
         if not hasattr(self, 'average_batch'):
-            self.__setattr__('average_batch', True)
-        if not hasattr(self, 'use_cuda'):
-            self.__setattr__('use_cuda', True)
+            self.__setattr__('average_batch', False)
+        if not hasattr(self, 'device'):
+            self.__setattr__('device',  torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
 
         # init transitions
         self.START_TAG_IDX, self.END_TAG_IDX = -2, -1
-        init_transitions = torch.zeros(self.target_size+2, self.target_size+2)
+        init_transitions = torch.zeros(self.target_size + 2, self.target_size + 2)
         init_transitions[:, self.START_TAG_IDX] = -1000.
         init_transitions[self.END_TAG_IDX, :] = -1000.
-        if self.use_cuda:
-            init_transitions = init_transitions.cuda()
+        init_transitions = init_transitions.to(self.device)
         self.transitions = nn.Parameter(init_transitions)
 
     def _forward_alg(self, feats, mask):
         """
-        Do the forward algorithm to compute the partition function (batched).
+        Forward algorithm for computing the partition function (batched)
+        in the log space (log Z(x)).
 
         Args:
             feats: size=(batch_size, seq_len, self.target_size+2)
             mask: size=(batch_size, seq_len)
 
         Returns:
-            xxx
+            summed_log_patitions: 1
+            scores: size=(seq_len, batch_size, tag_size, tag_size)
         """
         batch_size = feats.size(0)
         seq_len = feats.size(1)
@@ -73,19 +72,16 @@ class CRF(nn.Module):
             1, tag_size, tag_size).expand(ins_num, tag_size, tag_size)
         scores = scores.view(seq_len, batch_size, tag_size, tag_size)
 
-        seq_iter = enumerate(scores)
-        try:
-            _, inivalues = seq_iter.__next__()
-        except:
-            _, inivalues = seq_iter.next()
-        partition = inivalues[:, self.START_TAG_IDX, :].clone().view(batch_size, tag_size, 1)
+        # s(x, *, y, 1) = s(*, y) + s(x, y)
+        partition = scores[0, :, self.START_TAG_IDX, :].clone().view(batch_size, tag_size, 1)
 
-        for idx, cur_values in seq_iter:
+        for idx, cur_values in enumerate(scores[1:]):
+            # log a(y, t) = log \sum_{y'} exp (log a(y', t-1) + s(x, y, y', t))
             cur_values = cur_values + partition.contiguous().view(
                 batch_size, tag_size, 1).expand(batch_size, tag_size, tag_size)
             cur_partition = log_sum_exp(cur_values, tag_size)
 
-            mask_idx = mask[idx, :].view(batch_size, 1).expand(batch_size, tag_size)
+            mask_idx = mask[idx+1, :].view(batch_size, 1).expand(batch_size, tag_size)
 
             masked_cur_partition = cur_partition.masked_select(mask_idx)
             if masked_cur_partition.dim() != 0:
@@ -159,9 +155,8 @@ class CRF(nn.Module):
         last_values = last_partition.expand(batch_size, tag_size, tag_size) + \
             self.transitions.view(1, tag_size, tag_size).expand(batch_size, tag_size, tag_size)
         _, last_bp = torch.max(last_values, 1)
-        pad_zero = Variable(torch.zeros(batch_size, tag_size)).long()
-        if self.use_cuda:
-            pad_zero = pad_zero.cuda()
+        pad_zero = torch.zeros(batch_size, tag_size).long()
+        pad_zero = pad_zero.to(self.device)
         back_points.append(pad_zero)
         back_points = torch.cat(back_points).view(seq_len, batch_size, tag_size)
 
@@ -173,9 +168,8 @@ class CRF(nn.Module):
 
         back_points = back_points.transpose(1, 0).contiguous()
 
-        decode_idx = Variable(torch.LongTensor(seq_len, batch_size))
-        if self.use_cuda:
-            decode_idx = decode_idx.cuda()
+        decode_idx = torch.LongTensor(seq_len, batch_size)
+        decode_idx = decode_idx.to(self.device)
         decode_idx[-1] = pointer.data
         for idx in range(len(back_points)-2, -1, -1):
             pointer = torch.gather(back_points[idx], 1, pointer.contiguous().view(batch_size, 1))
@@ -202,9 +196,8 @@ class CRF(nn.Module):
         seq_len = scores.size(0)
         tag_size = scores.size(-1)
 
-        new_tags = Variable(torch.LongTensor(batch_size, seq_len))
-        if self.use_cuda:
-            new_tags = new_tags.cuda()
+        new_tags = torch.LongTensor(batch_size, seq_len)
+        new_tags = new_tags.to(self.device)
         for idx in range(seq_len):
             if idx == 0:
                 new_tags[:, 0] = (tag_size - 2) * tag_size + tags[:, 0]

@@ -137,7 +137,7 @@ def main():
         print("{0} {1} loss {2} dev-f1 {3:.4f} test-f1 {4:.4f}".format(datetime.datetime.now(),
                 epoch, loss, df1, tef1))
 
-    print("Finish training - dev-f1 {0:.4f} test-f1 {1:.4f}".format(dev_f1, test_f1)) 
+    print("Finish training - dev-f1 {0:.4f} test-f1 {1:.4f}".format(dev_f1, test_f1))
 
     # Save model
     #torch.save(model.state_dict(), "tagger.pt.model")
@@ -204,7 +204,7 @@ class TaggerModel(torch.nn.Module):
         output_scores = self.hidden_to_tag(lstm_out_dropped)
 
         loss = self.crf.neg_log_likelihood_loss(output_scores, mask, labels)
-        _, predicted_tags = self.crf(output_scores, mask)
+        predicted_tags = self.crf(output_scores, mask)
 
         return loss, predicted_tags
 
