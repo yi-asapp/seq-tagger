@@ -247,4 +247,4 @@ class CRF(nn.Module):
 
         if self.average_batch:
             return (loss_aug_score - gold_score) / batch_size
-        return los_aug_score - gold_score
+        return loss_aug_score - gold_score
