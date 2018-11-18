@@ -168,10 +168,10 @@ class CRF(nn.Module):
             pointer = torch.gather(back_points[idx], 1, pointer.contiguous().view(batch_size, 1))
             decode_idx[idx] = pointer.view(-1).data
         best_path = decode_idx.transpose(1, 0)
-        return best_path
+        return best_path, scores
 
     def forward(self, feats, mask):
-        best_path = self._viterbi_decode(feats, mask)
+        best_path, _ = self._viterbi_decode(feats, mask)
         return best_path
 
     def _score_sentence(self, scores, mask, tags):
@@ -225,3 +225,25 @@ class CRF(nn.Module):
         if self.average_batch:
             return (forward_score - gold_score) / batch_size
         return forward_score - gold_score
+
+    def ssvm_loss(self, feats, mask, tags, delta=0.25):
+        """
+        Args:
+            feats: size=(batch_size, seq_len, tag_size)
+            mask: size=(batch_size, seq_len)
+            tags: size=(batch_size, seq_len)
+        """
+        batch_size = feats.size(0)
+        _, scores = self._viterbi_decode(feats, mask)
+        gold_score = self._score_sentence(scores, mask, tags)
+
+        loss_aug_feats = feats + delta
+        offsets = torch.zeros_like(loss_aug_feats)
+        offsets.scatter_(2, tags.view(batch_size, seq_len, 1), -delta)
+        loss_aug_feats += offsets
+        decoded, loss_aug_scores = self._viterbi_decode(loss_aug_feats, mask)
+        loss_aug_score = self._score_sentence(loss_aug_scores, mask, decoded)
+
+        if self.average_batch:
+            return (loss_aug_score - gold_score) / batch_size
+        return los_aug_score - gold_score
