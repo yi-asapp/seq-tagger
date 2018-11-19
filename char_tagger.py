@@ -184,14 +184,19 @@ class TaggerModel(torch.nn.Module):
 
         sent_chars = sent_chars.view(cur_batch_size * max_length, -1)
 
-        char_seq_lengths = torch.LongTensor(char_lengths)
+ #       char_vectors = self.char_embedding(sent_chars)
+ #       char_lstm_out, (hn, cn) = self.char_lstm(char_vectors, None)
+ #       char_lstm_out = hn[-1].view(cur_batch_size, max_length, CHAR_LSTM_HIDDEN)
+ #       concat_vectors = torch.cat((dropped_word_vectors, char_lstm_out), dim=2)
+
+        char_seq_lengths = torch.LongTensor(char_lengths).to(device)
         char_seq_lengths, char_perm_idx = char_seq_lengths.sort(descending=True)
         _, char_seq_recover = char_perm_idx.sort(descending=False)
 
         char_vectors = self.char_embedding(sent_chars[char_perm_idx])
         packed_chars = torch.nn.utils.rnn.pack_padded_sequence(
                 char_vectors, char_seq_lengths.cpu().numpy(), True)
-        char_lstm_out, (hn, cn) = self.char_lstm(packed_vectors, None)
+        char_lstm_out, (hn, cn) = self.char_lstm(packed_chars, None)
         char_lstm_out, _ = torch.nn.utils.rnn.pad_packed_sequence(char_lstm_out,
                 batch_first=True, total_length=max_char_length)
         char_lstm_out = hn[-1][char_seq_recover].view(cur_batch_size, max_length, CHAR_LSTM_HIDDEN)
@@ -238,7 +243,7 @@ def do_pass(data, token_to_id, char_to_id, tag_to_id, id_to_tag, expressions, tr
                 max_char_length = max(max_char_length, len(token))
                 char_lengths.append(len(token))
             for _ in range(max_length - len(tokens)):
-                char_lengths.append(0)
+                char_lengths.append(1) # TODO: this is a hack, need to use mask later
         input_array = torch.zeros((cur_batch_size, max_length)).long()
         input_char_array = torch.zeros((cur_batch_size, max_length, max_char_length)).long()
         output_array = torch.zeros((cur_batch_size, max_length)).long()
