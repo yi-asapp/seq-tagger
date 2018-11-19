@@ -173,36 +173,22 @@ class TaggerModel(torch.nn.Module):
         # Create final matrix multiply parameters
         self.hidden_to_tag = torch.nn.Linear(LSTM_HIDDEN * 2, ntags)
 
-    def forward(self, sentences, sent_chars, labels, lengths, char_lengths, cur_batch_size):
+    def forward(self, sentences, sent_tokens, labels, lengths, cur_batch_size):
         max_length = sentences.size(1)
-        max_char_length = sent_chars.size(2)
 
         # Look up word vectors
         word_vectors = self.word_embedding(sentences)
         # Apply dropout
         dropped_word_vectors = self.word_dropout(word_vectors)
 
-        sent_chars = sent_chars.view(cur_batch_size * max_length, -1)
+        sent_tokens = sent_tokens.view(cur_batch_size * max_length, -1)
 
- #       char_vectors = self.char_embedding(sent_chars)
- #       char_lstm_out, (hn, cn) = self.char_lstm(char_vectors, None)
- #       char_lstm_out = hn[-1].view(cur_batch_size, max_length, CHAR_LSTM_HIDDEN)
- #       concat_vectors = torch.cat((dropped_word_vectors, char_lstm_out), dim=2)
-
-        char_seq_lengths = torch.LongTensor(char_lengths).to(device)
-        char_seq_lengths, char_perm_idx = char_seq_lengths.sort(descending=True)
-        _, char_seq_recover = char_perm_idx.sort(descending=False)
-
-        char_vectors = self.char_embedding(sent_chars[char_perm_idx])
-        packed_chars = torch.nn.utils.rnn.pack_padded_sequence(
-                char_vectors, char_seq_lengths.cpu().numpy(), True)
-        char_lstm_out, (hn, cn) = self.char_lstm(packed_chars, None)
-        char_lstm_out, _ = torch.nn.utils.rnn.pad_packed_sequence(char_lstm_out,
-                batch_first=True, total_length=max_char_length)
-        char_lstm_out = hn[-1][char_seq_recover].view(cur_batch_size, max_length, CHAR_LSTM_HIDDEN)
+        token_vectors = self.char_embedding(sent_tokens)
+        char_lstm_out, (hn, cn) = self.char_lstm(token_vectors, None)
+        char_lstm_out = hn[-1].view(cur_batch_size, max_length, CHAR_LSTM_HIDDEN)
         concat_vectors = torch.cat((dropped_word_vectors, char_lstm_out), dim=2)
 
-        # Run the LSTM over the input, reshaping data for efficiency
+       # Run the LSTM over the input, reshaping data for efficiency
         packed_words = torch.nn.utils.rnn.pack_padded_sequence(
                 concat_vectors, lengths, True)
         lstm_out, _ = self.lstm(packed_words, None)
@@ -236,30 +222,26 @@ def do_pass(data, token_to_id, char_to_id, tag_to_id, id_to_tag, expressions, tr
         cur_batch_size = len(batch)
         max_length = len(batch[0][0])
         lengths = [len(v[0]) for v in batch]
-        max_char_length = 0
-        char_lengths = []
+        max_token_length = 0
         for tokens, _ in batch:
             for token in tokens:
-                max_char_length = max(max_char_length, len(token))
-                char_lengths.append(len(token))
-            for _ in range(max_length - len(tokens)):
-                char_lengths.append(1) # TODO: this is a hack, need to use mask later
+                max_token_length = max(max_token_length, len(token))
         input_array = torch.zeros((cur_batch_size, max_length)).long()
-        input_char_array = torch.zeros((cur_batch_size, max_length, max_char_length)).long()
+        input_token_array = torch.zeros((cur_batch_size, max_length, max_token_length)).long()
         output_array = torch.zeros((cur_batch_size, max_length)).long()
         for n, (tokens, tags) in enumerate(batch):
             token_ids = [token_to_id.get(simplify_token(t), 1) for t in tokens]
             input_array[n, :len(tokens)] = torch.LongTensor(token_ids)
             for m, token in enumerate(tokens):
                 char_ids = [char_to_id.get(c, 1) for c in simplify_token(token)]
-                input_char_array[n, m,  :len(token)] = torch.LongTensor(char_ids)
+                input_token_array[n, m,  :len(token)] = torch.LongTensor(char_ids)
             tag_ids = [tag_to_id[t] for t in tags]
             output_array[n, :len(tags)] = torch.LongTensor(tag_ids)
 
         model.to(device)
         # Construct computation
-        batch_loss, output = model(input_array.to(device), input_char_array.to(device), output_array.to(device),
-                lengths, char_lengths, cur_batch_size)
+        batch_loss, output = model(input_array.to(device), input_token_array.to(device), output_array.to(device),
+                lengths, cur_batch_size)
 
         # Run computations
         if train:
