@@ -5,9 +5,9 @@ PAD = "__PAD__"
 UNK = "__UNK__"
 DIM_EMBEDDING = 100
 LSTM_LAYER = 1
-LSTM_HIDDEN = 200
+LSTM_HIDDEN = 100
 CHAR_DIM_EMBEDDING = 30
-CHAR_LSTM_HIDDEN = 50
+CHAR_LSTM_HIDDEN = 25
 BATCH_SIZE = 10
 LEARNING_RATE = 0.015
 LEARNING_DECAY_RATE = 0.05
@@ -137,7 +137,12 @@ def main():
     print("Finish training - dev-f1 {0:.4f} test-f1 {1:.4f}".format(dev_f1, test_f1))
 
     # Save model
-    #torch.save(model.state_dict(), "tagger.pt.model")
+    torch.save({
+                 'pretrained_list' : pretrained_list,
+                 'token_to_id' : token_to_id,
+                 'char_to_id' : char_to_id,
+                 'id_to_tag' : id_to_tag,
+                 'model_state_dict' : model.state_dict()}, "tagger.pt.model")
 
     # Load model
     #model.load_state_dict(torch.load('tagger.pt.model'))

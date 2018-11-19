@@ -226,7 +226,7 @@ class CRF(nn.Module):
             return (forward_score - gold_score) / batch_size
         return forward_score - gold_score
 
-    def ssvm_loss(self, feats, mask, tags, delta=0.25):
+    def ssvm_loss(self, feats, mask, tags, delta=1.):
         """
         Args:
             feats: size=(batch_size, seq_len, tag_size)
