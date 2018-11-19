@@ -5,9 +5,9 @@ PAD = "__PAD__"
 UNK = "__UNK__"
 DIM_EMBEDDING = 100
 LSTM_LAYER = 1
-LSTM_HIDDEN = 100
+LSTM_HIDDEN = 200
 CHAR_DIM_EMBEDDING = 30
-CHAR_LSTM_HIDDEN = 25
+CHAR_LSTM_HIDDEN = 50
 BATCH_SIZE = 10
 LEARNING_RATE = 0.015
 LEARNING_DECAY_RATE = 0.05
@@ -183,13 +183,18 @@ class TaggerModel(torch.nn.Module):
         dropped_word_vectors = self.word_dropout(word_vectors)
 
         sent_chars = sent_chars.view(cur_batch_size * max_length, -1)
-        char_vectors = self.char_embedding(sent_chars)
-#        packed_chars = torch.nn.utils.rnn.pack_padded_sequence(
-#                char_vectors, char_lengths, True)
-        char_lstm_out, (hn, cn) = self.char_lstm(char_vectors, None)
-#        char_lstm_out, _ = torch.nn.utils.rnn.pad_packed_sequence(char_lstm_out,
-#                batch_first=True, total_length=max_char_length)
-        char_lstm_out = hn[-1].view(cur_batch_size, max_length, CHAR_LSTM_HIDDEN)
+
+        char_seq_lengths = torch.LongTensor(char_lengths)
+        char_seq_lengths, char_perm_idx = char_seq_lengths.sort(descending=True)
+        _, char_seq_recover = char_perm_idx.sort(descending=False)
+
+        char_vectors = self.char_embedding(sent_chars[char_perm_idx])
+        packed_chars = torch.nn.utils.rnn.pack_padded_sequence(
+                char_vectors, char_seq_lengths.cpu().numpy(), True)
+        char_lstm_out, (hn, cn) = self.char_lstm(packed_vectors, None)
+        char_lstm_out, _ = torch.nn.utils.rnn.pad_packed_sequence(char_lstm_out,
+                batch_first=True, total_length=max_char_length)
+        char_lstm_out = hn[-1][char_seq_recover].view(cur_batch_size, max_length, CHAR_LSTM_HIDDEN)
         concat_vectors = torch.cat((dropped_word_vectors, char_lstm_out), dim=2)
 
         # Run the LSTM over the input, reshaping data for efficiency
