@@ -3,24 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-def log_sum_exp(inp, m_size):
-    """
-    LogSumExp trick: https://en.wikipedia.org/wiki/LogSumExp
-
-    Args:
-        inp: size=(batch_size, vanishing_dim, hidden_dim)
-        m_size: hidden_dim
-
-    Returns:
-        out: size=(batch_size, hidden_dim)
-    """
-    _, idx = torch.max(inp, 1)  # batch_size * hidden_dim
-    max_score = torch.gather(inp, 1, idx.view(-1, 1, m_size)).view(-1, 1, m_size)  # batch_size * 1 * hidden_dim
-    return max_score.view(-1, m_size) + torch.log(torch.sum(
-        torch.exp(inp - max_score.expand_as(inp)), 1)).view(-1, m_size)
-
-
-class CRF(nn.Module):
+class SSVM(nn.Module):
 
     def __init__(self, **kwargs):
         """
@@ -29,7 +12,7 @@ class CRF(nn.Module):
             average_batch: bool, average loss over a batch, default is False
             device: torch.device, device type
         """
-        super(CRF, self).__init__()
+        super(SSVM, self).__init__()
         for k in kwargs:
             self.__setattr__(k, kwargs[k])
         if not hasattr(self, 'average_batch'):
@@ -45,56 +28,6 @@ class CRF(nn.Module):
         init_transitions = init_transitions.to(self.device)
         self.transitions = nn.Parameter(init_transitions)
 
-    def _forward_alg(self, feats, mask):
-        """
-        Forward algorithm for computing the partition function (batched)
-        in the log space (log Z(x)).
-
-        Args:
-            feats: size=(batch_size, seq_len, self.target_size+2)
-            mask: size=(batch_size, seq_len)
-
-        Returns:
-            summed_log_patitions: 1
-            scores: size=(seq_len, batch_size, tag_size, tag_size)
-        """
-        batch_size = feats.size(0)
-        seq_len = feats.size(1)
-        tag_size = feats.size(-1)
-
-        mask = mask.transpose(1, 0).contiguous()
-        ins_num = batch_size * seq_len
-
-        feats = feats.transpose(1, 0).contiguous().view(
-            ins_num, 1, tag_size).expand(ins_num, tag_size, tag_size)
-
-        scores = feats + self.transitions.view(
-            1, tag_size, tag_size).expand(ins_num, tag_size, tag_size)
-        scores = scores.view(seq_len, batch_size, tag_size, tag_size)
-
-        # s(x, *, y, 1) = s(*, y) + s(x, y)
-        partition = scores[0, :, self.START_TAG_IDX, :].clone().view(batch_size, tag_size, 1)
-
-        for idx, cur_values in enumerate(scores[1:]):
-            # log a(y, t) = log \sum_{y'} exp (log a(y', t-1) + s(x, y, y', t))
-            cur_values = cur_values + partition.contiguous().view(
-                batch_size, tag_size, 1).expand(batch_size, tag_size, tag_size)
-            cur_partition = log_sum_exp(cur_values, tag_size)
-
-            mask_idx = mask[idx+1, :].view(batch_size, 1).expand(batch_size, tag_size)
-
-            masked_cur_partition = cur_partition.masked_select(mask_idx)
-            if masked_cur_partition.dim() != 0:
-                mask_idx = mask_idx.contiguous().view(batch_size, tag_size, 1)
-                partition.masked_scatter_(mask_idx, masked_cur_partition)
-
-        cur_values = self.transitions.view(1, tag_size, tag_size).expand(
-            batch_size, tag_size, tag_size) + partition.contiguous().view(
-                batch_size, tag_size, 1).expand(batch_size, tag_size, tag_size)
-        cur_partition = log_sum_exp(cur_values, tag_size)
-        final_partition = cur_partition[:, self.END_TAG_IDX]
-        return final_partition.sum(), scores
-
     def _viterbi_decode(self, feats, mask):
         """
         Args:
@@ -109,16 +42,9 @@ class CRF(nn.Module):
         tag_size = feats.size(-1)
 
         length_mask = torch.sum(mask, dim=1).view(batch_size, 1).long()
-
         mask = mask.transpose(1, 0).contiguous()
-        ins_num = seq_len * batch_size
 
-        feats = feats.transpose(1, 0).contiguous().view(
-            ins_num, 1, tag_size).expand(ins_num, tag_size, tag_size)
-
-        scores = feats + self.transitions.view(
-            1, tag_size, tag_size).expand(ins_num, tag_size, tag_size)
-        scores = scores.view(seq_len, batch_size, tag_size, tag_size)
+        scores = self._feats_to_scores(feats)
 
         # record the position of the best score
         back_points, partition_history = [], []
@@ -168,10 +94,10 @@ class CRF(nn.Module):
             pointer = torch.gather(back_points[idx], 1, pointer.contiguous().view(batch_size, 1))
             decode_idx[idx] = pointer.view(-1).data
         best_path = decode_idx.transpose(1, 0)
-        return best_path
+        return best_path, scores
 
     def forward(self, feats, mask):
-        best_path = self._viterbi_decode(feats, mask)
+        best_path, _ = self._viterbi_decode(feats, mask)
         return best_path
 
     def _score_sentence(self, scores, mask, tags):
@@ -212,16 +138,41 @@ class CRF(nn.Module):
 
         return score
 
-    def neg_log_likelihood_loss(self, feats, mask, tags):
+    def _feats_to_scores(self, feats):
+        """
+        Absorb node potentials into edge potentials
+        """
+        batch_size = feats.size(0)
+        seq_len = feats.size(1)
+        tag_size = feats.size(-1)
+        ins_num = seq_len * batch_size
+        feats = feats.transpose(1, 0).contiguous().view(
+            ins_num, 1, tag_size).expand(ins_num, tag_size, tag_size)
+        scores = feats + self.transitions.view(
+            1, tag_size, tag_size).expand(ins_num, tag_size, tag_size)
+        scores = scores.view(seq_len, batch_size, tag_size, tag_size)
+        return scores
+
+    def hinge_loss(self, feats, mask, tags, eta=1.):
         """
         Args:
             feats: size=(batch_size, seq_len, tag_size)
             mask: size=(batch_size, seq_len)
             tags: size=(batch_size, seq_len)
+            eta: coefficient of hamming distance
         """
         batch_size = feats.size(0)
-        forward_score, scores = self._forward_alg(feats, mask)
+        seq_len = feats.size(1)
+        scores = self._feats_to_scores(feats)
         gold_score = self._score_sentence(scores, mask, tags)
+
+        loss_aug_feats = feats + eta
+        offsets = torch.zeros_like(loss_aug_feats)
+        offsets.scatter_(2, tags.view(batch_size, seq_len, 1), -eta)
+        loss_aug_feats += offsets
+        decoded, loss_aug_scores = self._viterbi_decode(loss_aug_feats, mask)
+        loss_aug_score = self._score_sentence(loss_aug_scores, mask, decoded)
+
         if self.average_batch:
-            return (forward_score - gold_score) / batch_size
-        return forward_score - gold_score
+            return (loss_aug_score - gold_score) / batch_size
+        return loss_aug_score - gold_score

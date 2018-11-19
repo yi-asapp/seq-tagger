@@ -1,7 +1,7 @@
 import argparse, random, sys, datetime
 import numpy as np
 
-from crf import CRF
+from ssvm import SSVM
 
 PAD = "__PAD__"
 UNK = "__UNK__"
@@ -13,7 +13,7 @@ CHAR_LSTM_HIDDEN = 50
 BATCH_SIZE = 10
 LEARNING_RATE = 0.015
 LEARNING_DECAY_RATE = 0.05
-EPOCHS = 100
+EPOCHS = 200
 KEEP_PROB = 0.5
 GLOVE = "./data/glove.6B.100d.txt"
 WEIGHT_DECAY = 1e-8
@@ -171,7 +171,7 @@ class TaggerModel(torch.nn.Module):
         # Create final matrix multiply parameters
         self.hidden_to_tag = torch.nn.Linear(LSTM_HIDDEN * 2, ntags + 2)
 
-        self.crf = CRF(target_size=ntags)
+        self.ssvm = SSVM(target_size=ntags)
 
     def forward(self, sentences, mask, sent_chars, labels, lengths, char_lengths, cur_batch_size, epo):
         max_length = sentences.size(1)
@@ -199,8 +199,8 @@ class TaggerModel(torch.nn.Module):
         # Matrix multiply to get scores for each tag
         output_scores = self.hidden_to_tag(lstm_out_dropped)
 
-        loss = self.crf.neg_log_likelihood_loss(output_scores, mask, labels)
-        predicted_tags = self.crf(output_scores, mask)
+        loss = self.ssvm.hinge_loss(output_scores, mask, labels)
+        predicted_tags = self.ssvm(output_scores, mask)
 
         return loss, predicted_tags
 
